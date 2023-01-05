@@ -12,9 +12,11 @@ python = "^3.10"
 questdb = "^1.1.0"
 pandas = "^1.5.2"
 pyarrow = "^10.0.1"
+numba = "^0.56.4"
 
 [tool.poetry.scripts]
 py-tsbs-benchmark = "py_tsbs_benchmark:main"
+send-ilp-raw = "py_tsbs_benchmark.raw_ilp_sender:main"
 
 [build-system]
 requires = ["poetry-core"]
