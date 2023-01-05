@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "py-tsbs-benchmark"
+version = "0.1.0"
+description = "Benchmark ingestion of the TSBS dataset into QuestDB via ILP using the `questdb` Python library and Pandas"
+authors = ["Adam Cimarosti <cimarosti@gmail.com>"]
+license = "Apache License 2.0"
+readme = "README.md"
+packages = [{include = "py_tsbs_benchmark"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+questdb = "^1.1.0"
+pandas = "^1.5.2"
+pyarrow = "^10.0.1"
+
+[tool.poetry.scripts]
+py-tsbs-benchmark = "py_tsbs_benchmark:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
