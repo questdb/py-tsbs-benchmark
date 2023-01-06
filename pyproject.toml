@@ -13,10 +13,11 @@ questdb = "^1.1.0"
 pandas = "^1.5.2"
 pyarrow = "^10.0.1"
 numba = "^0.56.4"
+requests = "^2.28.1"
 
 [tool.poetry.scripts]
-py-tsbs-benchmark = "py_tsbs_benchmark:main"
-send-ilp-raw = "py_tsbs_benchmark.raw_ilp_sender:main"
+bench_pandas = "py_tsbs_benchmark.bench_pandas:main"
+bench_raw_ilp = "py_tsbs_benchmark.bench_raw_ilp:main"
 
 [build-system]
 requires = ["poetry-core"]
