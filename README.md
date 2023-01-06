@@ -1,5 +1,8 @@
 # py-tsbs-benchmark
-Benchmark ingestion of the TSBS dataset into QuestDB via ILP using the `questdb` Python library and Pandas.
+Benchmark ingestion of the [TSBS](https://github.com/timescale/tsbs)
+"dev ops" (a.k.a. 'cpu') dataset into QuestDB via ILP using the
+[`questdb`](https://py-questdb-client.readthedocs.io/en/latest/) Python library
+and Pandas.
 
 ## Preparing QuestDB
 
@@ -28,9 +31,11 @@ The numbers included below are from the following setup:
 * AMD 5950x
 * 64G ram DDR4-3600
 * 2TB Samsung 980 PRO
-* Linux
+* Linux (kernel version: 6.0.6)
+* Python 3.10.8
+* QuestDB 6.6.1
 
-For this specific box, I've tweaked the QuestDB
+For this specific hardware, we benchmark with tweaked QuestDB
 config as shown below. This is done to avoid the server instance overbooking
 threads, given that we'll be also running the client on the same host.
 
@@ -40,21 +45,146 @@ shared.worker.count=6
 line.tcp.io.worker.count=6
 ```
 
-If you're benchmarking on a separate machine then you shouldn't need any config
-tweaks to get best performance.
+If your benchmarking client and QuestDB server are on separate machines then you
+shouldn't need any config tweaks to get best the performance.
 
 Your milage may vary of course, but it's clear from the benchmarks below that
 it's worth using the [`sender.dataframe()`](https://py-questdb-client.readthedocs.io/en/latest/api.html#questdb.ingress.Sender.dataframe) API and not looping through the
 dataframe row by row in Python.
 
+## Results
+
+By implementing the Pandas ingestion layer in native code we're now 20x faster
+in single-threaded code and 60x faster in multi-threaded code, including
+database insert operations.
+
+**Important**: Timings below *exclude* generating the sample Pandas dataframe.
+
+### Serialization to ILP in-memory buffer
+
+(no network operations)
+
+<!--
+https://quickchart.io/sandbox
+{
+  type: 'bar',
+  data: {
+    labels: ['df.iterrows() + sender.row()', 'sender.dataframe() - single thread', 'sender.dataframe() - 6 client threads'],
+    datasets: [{
+      label: 'Throughput MiB/s',
+      data: [8.96, 541.93, 2616.29],
+      borderColor: "#d14671",
+      backgroundColor: "#d14671",
+    }]
+  }
+}
+-->
+![chart](https://quickchart.io/chart?w=800&h=400&v=2.9.4&c=%7B%0A%20%20type%3A%20%27bar%27%2C%0A%20%20data%3A%20%7B%0A%20%20%20%20labels%3A%20%5B%27df.iterrows()%20%2B%20sender.row()%27%2C%20%27sender.dataframe()%20-%20single%20thread%27%2C%20%27sender.dataframe()%20-%206%20client%20threads%27%5D%2C%0A%20%20%20%20datasets%3A%20%5B%7B%0A%20%20%20%20%20%20label%3A%20%27Throughput%20MiB%2Fs%27%2C%0A%20%20%20%20%20%20data%3A%20%5B8.96%2C%20541.93%2C%202616.29%5D%2C%0A%20%20%20%20%20%20borderColor%3A%20%22%23d14671%22%2C%0A%20%20%20%20%20%20backgroundColor%3A%20%22%23d14671%22%2C%0A%20%20%20%20%7D%5D%0A%20%20%7D%0A%7D)
+
+### Serialization, network send & data insertion into QuestDB
+
+<!--
+https://quickchart.io/sandbox
+{
+  type: 'bar',
+  data: {
+    labels: ['df.iterrows() + sender.row()', 'sender.dataframe() - single thread', 'sender.dataframe() - 6 client threads'],
+    datasets: [{
+      label: 'Throughput MiB/s',
+      data: [8.99, 196.34, 522.94],
+      borderColor: "#b1b5d3",
+      backgroundColor: "#b1b5d3",
+    }]
+  }
+}
+-->
+![chart](https://quickchart.io/chart?w=800&h=400&v=2.9.4&c=%7B%0A%20%20type%3A%20%27bar%27%2C%0A%20%20data%3A%20%7B%0A%20%20%20%20labels%3A%20%5B%27df.iterrows()%20%2B%20sender.row()%27%2C%20%27sender.dataframe()%20-%20single%20thread%27%2C%20%27sender.dataframe()%20-%206%20client%20threads%27%5D%2C%0A%20%20%20%20datasets%3A%20%5B%7B%0A%20%20%20%20%20%20label%3A%20%27Throughput%20MiB%2Fs%27%2C%0A%20%20%20%20%20%20data%3A%20%5B8.99%2C%20196.34%2C%20522.94%5D%2C%0A%20%20%20%20%20%20borderColor%3A%20%22%23b1b5d3%22%2C%0A%20%20%20%20%20%20backgroundColor%3A%20%22%23b1b5d3%22%2C%0A%20%20%20%20%7D%5D%0A%20%20%7D%0A%7D)
+
 ### Setup
+
+After cloning this git repo:
 
 ```bash
 poetry env use 3.10
 poetry install
 ```
 
-Note that each run will delete and re-create the `'cpu'` table.
+Note that each benchmark run will delete and re-create the `'cpu'` table.
+
+### Without Pandas Support
+
+Before Pandas support provided by the new
+[`questdb>=1.1.0`](https://pypi.org/project/questdb/) Python client,
+one had to iterate a Pandas dataframe row by row:
+
+```python
+with Sender('localhost', 9009) as sender:
+    for _index, row in df.iterrows():
+        sender.row(
+            'cpu',
+            symbols={
+                'hostname': row['hostname'],
+                'region': row['region'],
+                'datacenter': row['datacenter'],
+                'rack': row['rack'],
+                'os': row['os'],
+                'arch': row['arch'],
+                'team': row['team'],
+                'service': row['service'],
+                'service_version': row['service_version'],
+                'service_environment': row['service_environment']},
+            columns={
+                'usage_user': row['usage_user'],
+                'usage_system': row['usage_system'],
+                'usage_idle': row['usage_idle'],
+                'usage_nice': row['usage_nice'],
+                'usage_iowait': row['usage_iowait'],
+                'usage_irq': row['usage_irq'],
+                'usage_softirq': row['usage_softirq'],
+                'usage_steal': row['usage_steal'],
+                'usage_guest': row['usage_guest'],
+                'usage_guest_nice': row['usage_guest_nice']},
+            at=TimestampNanos(row['timestamp'].value))
+```
+
+This was *very* slow.
+
+```
+Running with params:
+    {'debug': False,
+     'host': 'localhost',
+     'http_port': 9000,
+     'ilp_port': 9009,
+     'py_row': True,
+     'row_count': 1000000,
+     'scale': 4000,
+     'seed': 6568188686568556488,
+     'send': True,
+     'shell': False,
+     'validation_query_timeout': 120.0,
+     'worker_chunk_row_count': 10000,
+     'workers': None,
+     'write_ilp': None}
+Dropped table cpu
+Created table cpu
+Serialized:
+  1000000 rows in 51.94s: 0.02 mil rows/sec.
+  ILP Buffer size: 465.19 MiB: 8.96 MiB/sec.
+Sent:
+  1000000 rows in 52.30s: 0.02 mil rows/sec.
+  ILP Buffer size: 465.19 MiB: 8.89 MiB/sec.
+```
+
+In profiling we found out that this was dominated (over 90% of time) by
+iterating through the pandas dataframe and *not* the `.row()` method itself.
+
+The new [`sender.dataframe()`](https://py-questdb-client.readthedocs.io/en/latest/api.html#questdb.ingress.Sender.dataframe)
+method resolves the performance problem.
+
+```python
+with Sender('localhost', 9009) as sender:
+    sender.dataframe(df, table_name='cpu', symbols=True, at='timestamp')
+```
 
 ### Single-threaded test
 
