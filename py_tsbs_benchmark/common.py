@@ -37,6 +37,7 @@ class CpuTable:
                 {', '.join(f'{col} double' for col in double_cols)},
                 timestamp timestamp)
                     timestamp(timestamp)
+                    partition by day
             '''
         response = self._request(sql)
         if response.get('ddl') == 'OK':

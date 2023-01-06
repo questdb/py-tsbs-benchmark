@@ -1,6 +1,8 @@
 import socket
 import time
 import struct
+import pprint
+import textwrap
 
 from .common import CpuTable
 
@@ -58,7 +60,8 @@ def parse_args():
 
 def main():
     args = parse_args()
-    print(f'Running with params: {vars(args)}')
+    pretty_args = textwrap.indent(pprint.pformat(vars(args)), '    ')
+    print(f'Running with params:\n{pretty_args}')
 
     cpu_table = CpuTable(args.host, args.http_port)
     cpu_table.drop()
