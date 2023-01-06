@@ -104,11 +104,14 @@ _MACHINE_SERVICE_ENVIRONMENT_CHOICES = [
 def gen_dataframe(seed, row_count, scale):
     rand, np_rand = random.Random(seed), np.random.default_rng(seed)
 
+    def mk_symbols_series(strings):
+        return pd.Series(strings, dtype='string[pyarrow]')
+
     def mk_hostname():
         repeated = [f'host_{n}' for n in range(scale)]
         repeat_count = row_count // scale + 1
         values = (repeated * repeat_count)[:row_count]
-        return pd.Categorical(values)
+        return mk_symbols_series(values)
 
     def rep_choice(choices):
         return rand.choices(choices, k=row_count)
@@ -127,16 +130,16 @@ def gen_dataframe(seed, row_count, scale):
 
     df = pd.DataFrame({
         'hostname': mk_hostname(),
-        'region': pd.Categorical(region),
-        'datacenter': pd.Categorical(datacenter),
-        'rack': pd.Categorical(rep_choice(_MACHINE_RACK_CHOICES)),
-        'os': pd.Categorical(rep_choice(_MACHINE_OS_CHOICES)),
-        'arch': pd.Categorical(rep_choice(_MACHINE_ARCH_CHOICES)),
-        'team': pd.Categorical(rep_choice(_MACHINE_TEAM_CHOICES)),
-        'service': pd.Categorical(rep_choice(_MACHINE_SERVICE_CHOICES)),
-        'service_version': pd.Categorical(
+        'region': mk_symbols_series(region),
+        'datacenter': mk_symbols_series(datacenter),
+        'rack': mk_symbols_series(rep_choice(_MACHINE_RACK_CHOICES)),
+        'os': mk_symbols_series(rep_choice(_MACHINE_OS_CHOICES)),
+        'arch': mk_symbols_series(rep_choice(_MACHINE_ARCH_CHOICES)),
+        'team': mk_symbols_series(rep_choice(_MACHINE_TEAM_CHOICES)),
+        'service': mk_symbols_series(rep_choice(_MACHINE_SERVICE_CHOICES)),
+        'service_version': mk_symbols_series(
             rep_choice(_MACHINE_SERVICE_VERSION_CHOICES)),
-        'service_environment': pd.Categorical(
+        'service_environment': mk_symbols_series(
             rep_choice(_MACHINE_SERVICE_ENVIRONMENT_CHOICES)),
         'usage_user': mk_cpu_series(),
 		'usage_system': mk_cpu_series(),
@@ -216,7 +219,7 @@ def chunk_up_by_worker(df, workers, chunk_row_count):
 def serialize_one(args, df):
     buf = qi.Buffer()
     t0 = time.monotonic()
-    buf.dataframe(df, at='timestamp')
+    buf.dataframe(df, symbols=True, at='timestamp')
     t1 = time.monotonic()
     elapsed = t1 - t0
     if args.write_ilp:
@@ -256,7 +259,7 @@ def serialize_workers(args, df):
             size = 0
             for df in dfs:
                 try:
-                    buf.dataframe(df, at='timestamp')
+                    buf.dataframe(df, symbols=True, at='timestamp')
                 except Exception as e:
                     with lock:
                         if not repld[0]:
@@ -271,7 +274,7 @@ def serialize_workers(args, df):
         def serialize_dfs(buf, dfs):
             size = 0
             for df in dfs:
-                buf.dataframe(df, at='timestamp')
+                buf.dataframe(df, symbols=True, at='timestamp')
                 size += len(buf)
                 buf.clear()
             return size
@@ -300,7 +303,7 @@ def serialize_workers(args, df):
 def send_one(args, df, size):
     with qi.Sender(args.host, args.ilp_port) as sender:
         t0 = time.monotonic()
-        sender.dataframe(df, at='timestamp')
+        sender.dataframe(df, symbols=True, at='timestamp')
         sender.flush()
         t1 = time.monotonic()
     elapsed = t1 - t0
@@ -336,7 +339,7 @@ def send_workers(args, df, size):
         with qi.Sender(args.host, args.ilp_port) as sender:
             t0 = time.monotonic()
             for df in worker_dfs:
-                sender.dataframe(df, at='timestamp')
+                sender.dataframe(df, symbols=True, at='timestamp')
         t1 = time.monotonic()
         return t0, t1
 
