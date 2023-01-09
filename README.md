@@ -10,7 +10,7 @@ It replicates and inserts the "dev ops" (a.k.a. 'cpu') dataset from the
 
 The TSBS project is written in Go, and we replicate the same logic here in
 Python: The generated data has the same columns, datatypes, cardinality etc.
-Scroll to the end to see a sample.
+Scroll to the end of this page to see a sample of generated data.
 
 To run these benchmarks, you will need:
 * Modern hardware with multiple cores and enough
