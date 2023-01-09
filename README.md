@@ -1,12 +1,12 @@
 # py-tsbs-benchmark
 Benchmark ingestion of the [TSBS](https://github.com/timescale/tsbs)
-"dev ops" (a.k.a. 'cpu') dataset into QuestDB via ILP using the
+"dev ops" (a.k.a. 'cpu') dataset into QuestDB via ILP uses the
 [`questdb`](https://py-questdb-client.readthedocs.io/en/latest/) Python library
 and Pandas.
 
-The TSBS project is written in Go, we replicate the same logic here in Python: The generated data has the same columns, datatypes, cardinality etc. Scroll to the end to see a sample.
+The TSBS project is written in Go, and we replicate the same logic here in Python: The generated data has the same columns, datatypes, cardinality etc. Scroll to the end to see a sample.
 
-To run these benchmarks you will need:
+To run these benchmarks, you will need:
 * Modern hardware with multiple cores and enough
 ram to hold a large Pandas dataset in memory.
 * Python 3.10 and [poetry](https://python-poetry.org/).
@@ -63,9 +63,9 @@ line.tcp.io.worker.count=6
 ```
 
 If your benchmarking client and QuestDB server are on separate machines then you
-shouldn't need any config tweaks to get best the performance.
+shouldn't need any config tweaks to get the best performance.
 
-The benchmark script assumes the instance is running on localhost on standard
+The benchmark script assumes that the instance is running on localhost on standard
 ports: If the instance is remote or uses different ports you can pass the
 `--host`, `--ilp-port` and `--http-port` arguments to the benchmark script
 shown later.
@@ -76,7 +76,7 @@ dataframe row by row in Python.
 
 ## Results
 
-By implementing the Pandas ingestion layer in native code we're now ~20x faster
+By implementing the Pandas ingestion layer in native code, we're now ~20x faster
 in single-threaded code and ~60x faster in multi-threaded code, including
 database insert operations.
 
@@ -279,7 +279,7 @@ poetry run bench_pandas --help
 
 ## Choices made
 
-We use the `'string[pyarrow]'` dtype in Pandas as it's one that allows us to
+We use the `'string[pyarrow]'` dtype in Pandas as it allows us to
 read the string column without needing to lock the GIL.
 
 Compared to using a more conventional Python `str`-object `'O'` dtype Pandas
