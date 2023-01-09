@@ -1,10 +1,16 @@
 # py-tsbs-benchmark
-Benchmark ingestion of the [TSBS](https://github.com/timescale/tsbs)
-"dev ops" (a.k.a. 'cpu') dataset into QuestDB via ILP uses the
-[`questdb`](https://py-questdb-client.readthedocs.io/en/latest/) Python library
-and Pandas.
+This repository hosts code to benchmark the ingestion rate of
+[Pandas](https://pandas.pydata.org/) dataframes into
+[QuestDB](https://questdb.io/) using the
+[`questdb`](https://py-questdb-client.readthedocs.io/en/latest/)
+Python client library.
 
-The TSBS project is written in Go, and we replicate the same logic here in Python: The generated data has the same columns, datatypes, cardinality etc. Scroll to the end to see a sample.
+It replicates and inserts the "dev ops" (a.k.a. 'cpu') dataset from the
+[TSBS](https://github.com/timescale/tsbs) project.
+
+The TSBS project is written in Go, and we replicate the same logic here in
+Python: The generated data has the same columns, datatypes, cardinality etc.
+Scroll to the end to see a sample.
 
 To run these benchmarks, you will need:
 * Modern hardware with multiple cores and enough
@@ -71,8 +77,8 @@ ports: If the instance is remote or uses different ports you can pass the
 shown later.
 
 Your milage may vary of course, but it's clear from the benchmarks below that
-it's worth using the [`sender.dataframe()`](https://py-questdb-client.readthedocs.io/en/latest/api.html#questdb.ingress.Sender.dataframe) API and not looping through the
-dataframe row by row in Python.
+it's worth using the [`sender.dataframe()`](https://py-questdb-client.readthedocs.io/en/latest/api.html#questdb.ingress.Sender.dataframe)
+API and not looping through the dataframe row by row in Python.
 
 ## Results
 
