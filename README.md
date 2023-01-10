@@ -58,7 +58,7 @@ The numbers included below are from the following setup:
 
 ### Configuration
 
-For this specific hardware, we benchmark with tweaked QuestDB
+For this specific hardware, we benchmark with a tweaked QuestDB
 config as shown below. This is done to avoid the server instance overbooking
 threads, given that we'll be also running the client on the same host.
 
@@ -87,7 +87,7 @@ in single-threaded code and ~60x faster in multi-threaded code, including
 database insert operations.
 
 Our performance improvements for just serializing to an in-memory ILP buffer are
-even better: Single threaded serialization performance is ~60x faster and ~290x
+even better: Single-threaded serialization performance is ~60x faster and ~290x
 faster when it's possible to serialize in parallel (when the Pandas column types
 hold data directly and not through Python objects).
 
@@ -114,7 +114,7 @@ https://quickchart.io/sandbox
   }
 }
 -->
-![chart](https://quickchart.io/chart?w=800&h=400&v=2.9.4&c=%7B%0A%20%20type%3A%20%27bar%27%2C%0A%20%20data%3A%20%7B%0A%20%20%20%20labels%3A%20%5B%27df.iterrows()%20%2B%20sender.row()%27%2C%20%27sender.dataframe()%20-%20single%20thread%27%2C%20%27sender.dataframe()%20-%206%20client%20threads%27%5D%2C%0A%20%20%20%20datasets%3A%20%5B%7B%0A%20%20%20%20%20%20label%3A%20%27Throughput%20MiB%2Fs%27%2C%0A%20%20%20%20%20%20data%3A%20%5B8.96%2C%20541.93%2C%202616.29%5D%2C%0A%20%20%20%20%20%20borderColor%3A%20%22%23d14671%22%2C%0A%20%20%20%20%20%20backgroundColor%3A%20%22%23d14671%22%2C%0A%20%20%20%20%7D%5D%0A%20%20%7D%0A%7D)
+![chart](results/serialization.webp)
 
 ### Serialization, network send & data insertion into QuestDB
 
@@ -133,7 +133,7 @@ https://quickchart.io/sandbox
   }
 }
 -->
-![chart](https://quickchart.io/chart?w=800&h=400&v=2.9.4&c=%7B%0A%20%20type%3A%20%27bar%27%2C%0A%20%20data%3A%20%7B%0A%20%20%20%20labels%3A%20%5B%27df.iterrows()%20%2B%20sender.row()%27%2C%20%27sender.dataframe()%20-%20single%20thread%27%2C%20%27sender.dataframe()%20-%206%20client%20threads%27%5D%2C%0A%20%20%20%20datasets%3A%20%5B%7B%0A%20%20%20%20%20%20label%3A%20%27Throughput%20MiB%2Fs%27%2C%0A%20%20%20%20%20%20data%3A%20%5B8.99%2C%20196.34%2C%20522.94%5D%2C%0A%20%20%20%20%20%20borderColor%3A%20%22%23b1b5d3%22%2C%0A%20%20%20%20%20%20backgroundColor%3A%20%22%23b1b5d3%22%2C%0A%20%20%20%20%7D%5D%0A%20%20%7D%0A%7D)
+![chart](results/ingestion.webp)
 
 ### Without Pandas Support (pre-existing `.row()` API)
 
@@ -203,7 +203,7 @@ Sent:
   ILP Buffer size: 465.19 MiB: 8.89 MiB/sec.
 ```
 
-In profiling we found out that this was dominated (over 90% of time) by
+During profiling, we found out that this was dominated (over 90% of the time) by
 iterating through the pandas dataframe and *not* the `.row()` method itself.
 
 The new [`sender.dataframe()`](https://py-questdb-client.readthedocs.io/en/latest/api.html#questdb.ingress.Sender.dataframe)
@@ -283,16 +283,45 @@ Sent:
 poetry run bench_pandas --help
 ```
 
-## Choices made
+## The `.dataframe()` method inner workings
+
+The TL;DR of how we achieve these numbers is by avoiding calling the Python
+interpreter within the send loop whenever possible.
+
+Data in pandas is (usually) laid out as columns of contiguous memory.
+Each column (series) is accessible either as a
+[numpy array](https://numpy.org/), itself accessible via the
+[Python Buffer protocol](https://docs.python.org/3/c-api/buffer.html), or
+accessible as an Apache Arrow array via their
+[C data interface](https://arrow.apache.org/docs/format/CDataInterface.html).
+We've done some experimentation to figure
+out which Pandas datatypes are best suited to either access pattern and go from
+there. We try to avoid copies whenever possible (almost always possible).
+
+We loop the buffers for the series in Cython (which compiles down to C and
+eventually native code) and call our serialization functions which are written
+in Rust and themselves have a C API. A bit of inlining and link time
+optimization and we can get good numbers.
+
+As a bonus, this approach also allows us to release the Python GIL and
+parallelize across threads for customers that need that little bit of extra
+performance.
+
+If you're interested in the actual implementation, it lives here:
+https://github.com/questdb/py-questdb-client/blob/main/src/questdb/dataframe.pxi
+
+## Pandas Dataframe String Column Choice
 
 We use the `'string[pyarrow]'` dtype in Pandas as it allows us to
 read the string column without needing to lock the GIL.
 
 Compared to using a more conventional Python `str`-object `'O'` dtype Pandas
-column type, this makes a significant different in the multi-threaded benchmark
+column type, this makes a significant difference in the multi-threaded benchmark
 as it enables parallelization, but makes little difference for a single-threaded
-use case scenario where we've gone the [extra mile](https://github.com/questdb/py-questdb-client/tree/main/pystr-to-utf8)
-to ensure fast Python string object to UTF-8 encoding performance.
+use case scenario where we've gone the
+[extra mile](https://github.com/questdb/py-questdb-client/tree/main/pystr-to-utf8)
+to ensure fast Python `str` object to UTF-8 encoding by handling the interal
+UCS-1, UCS-2 and UCS-4 representations in a small helper library in Rust.
 
 ## Sample of generated ILP messages
 
