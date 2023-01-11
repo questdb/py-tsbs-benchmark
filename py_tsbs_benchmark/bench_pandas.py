@@ -376,12 +376,12 @@ def send_workers(args, df, size):
     senders: list[qi.Sender] = [f.result() for f in senders]
 
     def worker_job(op, sender, worker_dfs):
-        with qi.Sender(args.host, args.ilp_port) as sender:
-            t0 = time.monotonic()
+        try:
             for df in worker_dfs:
                 op(sender, df)
-        t1 = time.monotonic()
-        return t0, t1
+            sender.flush()
+        finally:
+            sender.close()
 
     op = send_py_row if args.py_row else dataframe
 
@@ -389,12 +389,9 @@ def send_workers(args, df, size):
     futures: list[Future] = [
         tpe.submit(worker_job, op, sender, dfs)
         for sender, dfs in zip(senders, dfs_by_worker)]
-    results: list[tuple[int, int]] = [
-        f.result() for f in futures]
+    for f in futures:
+        f.result()
     t1 = time.monotonic()
-
-    for sender in senders:
-        sender.close()
 
     elapsed = t1 - t0
     row_speed = args.row_count / elapsed / 1_000_000.0
