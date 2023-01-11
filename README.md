@@ -1,16 +1,37 @@
-# py-tsbs-benchmark
+# Benchmarking Ingestion of Pandas into QuestDB
+
+## Background
+[QuestDB](https://questdb.io/) is our timeseries relational database with SQL
+query support. We support a dedicate protocol (called
+[ILP](https://questdb.io/docs/reference/api/ilp/overview/)) to ingest millions
+of rows per second over TCP.
+
+Many of our users are Python users who pre-process their data using
+[Pandas](https://pandas.pydata.org/) dataframes and up until recently, however,
+they would have to loop through the dataframes row-by-row in Python and would
+see quite poor performance when doing this (mere thousands of rows per second).
+
+We've recently introduced new functionality that iterates the dataframes in
+native code achieving significant speedups.
+
+## This Repo
+
 This repository hosts code to benchmark the ingestion rate of
-[Pandas](https://pandas.pydata.org/) dataframes into
-[QuestDB](https://questdb.io/) using the
+Pandas dataframes into QuestDB using the official
 [`questdb`](https://py-questdb-client.readthedocs.io/en/latest/)
 Python client library.
 
-It replicates and inserts the "dev ops" (a.k.a. 'cpu') dataset from the
-[TSBS](https://github.com/timescale/tsbs) project.
+The benchmark reproduces and ingests the "dev ops" (a.k.a. 'cpu') dataset from
+the [TSBS](https://github.com/timescale/tsbs) project over ILP into QuestDB.
 
 The TSBS project is written in Go, and we replicate the same logic here in
 Python: The generated data has the same columns, datatypes, cardinality etc.
 Scroll to the end of this page to see a sample of generated data.
+
+The data consists of:
+* 10 SYMBOL columns (string columns with repeated values - i.e. interned)
+* 10 DOUBLE columns (64-bit floats)
+* 1 TIMESTAMP column (unix epoch nanoseconds, UTC)
 
 To run these benchmarks, you will need:
 * Modern hardware with multiple cores and enough
@@ -58,9 +79,11 @@ The numbers included below are from the following setup:
 
 ### Configuration
 
-For this specific hardware, we benchmark with a tweaked QuestDB
-config as shown below. This is done to avoid the server instance overbooking
-threads, given that we'll be also running the client on the same host.
+For this specific hardware, we benchmark with a
+[tweaked](https://questdb.io/docs/reference/api/ilp/tcp-receiver/#capacity-planning)
+QuestDB config as shown below. This is done to avoid the server instance
+overbooking threads, given that we'll be also running the client on the same
+host.
 
 ```ini
 # conf/server.conf
@@ -206,6 +229,8 @@ Sent:
 During profiling, we found out that this was dominated (over 90% of the time) by
 iterating through the pandas dataframe and *not* the `.row()` method itself.
 
+### Single-threaded test (New `.dataframe()` API)
+
 The new [`sender.dataframe()`](https://py-questdb-client.readthedocs.io/en/latest/api.html#questdb.ingress.Sender.dataframe)
 method resolves the performance problem by iterating through the data in native
 code and is also easier to use from Python.
@@ -215,7 +240,7 @@ with Sender('localhost', 9009) as sender:
     sender.dataframe(df, table_name='cpu', symbols=True, at='timestamp')
 ```
 
-### Single-threaded test (New `.dataframe()` API)
+*Benchmarking code: `send_one` in [`py_tsbs_benchmark/bench_pandas.py`](py_tsbs_benchmark/bench_pandas.py).*
 
 ```bash
 poetry run bench_pandas --send
@@ -247,6 +272,12 @@ Sent:
 ```
 
 ### Multi-threaded test (multithreaded use of `.dataframe()` API)
+
+Since we release the Python GIL it's possible to also create multiple `sender`
+objects and ingest in parallel. This means that the QuestDB database receives
+the data [out of order, but the database deals with it](https://questdb.io/docs/concept/designated-timestamp#out-of-order-policy).
+
+*Benchmarking code: `send_workers` in [`py_tsbs_benchmark/bench_pandas.py`](py_tsbs_benchmark/bench_pandas.py).*
 
 ```bash
 poetry run bench_pandas --send --workers 6
