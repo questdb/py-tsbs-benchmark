@@ -197,7 +197,7 @@ with Sender('localhost', 9009) as sender:
 This was *very* slow.
 
 ```
-poetry run bench_pandas --py-row --send --row-count 1000000
+poetry run bench_pandas --op iterrows --send --row-count 1000000
 ```
 
 ```
@@ -206,7 +206,7 @@ Running with params:
      'host': 'localhost',
      'http_port': 9000,
      'ilp_port': 9009,
-     'py_row': True,
+     'op': 'iterrows',
      'row_count': 1000000,
      'scale': 4000,
      'seed': 6568188686568556488,

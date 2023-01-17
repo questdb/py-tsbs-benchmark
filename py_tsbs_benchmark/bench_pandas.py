@@ -171,7 +171,8 @@ def parse_args():
     parser.add_argument('--host', type=str, default='localhost')
     parser.add_argument('--ilp-port', type=int, default=9009)
     parser.add_argument('--http-port', type=int, default=9000)
-    parser.add_argument('--py-row', action='store_true', default=False)
+    parser.add_argument('--op', choices=['dataframe', 'iterrows', 'itertuples'],
+        default='dataframe')
     parser.add_argument('--workers', type=int, default=None)
     parser.add_argument('--worker-chunk-row-count', type=int, default=10_000)
     parser.add_argument('--validation-query-timeout', type=float, default=120.0)
@@ -248,13 +249,50 @@ def send_py_row(obj, df):
             at=qi.TimestampNanos(row['timestamp'].value))
 
 
+def send_py_tuple(obj, df):
+    for row in df.itertuples():
+        symbols = {
+            'hostname': row.hostname,
+            'region': row.region,
+            'datacenter': row.datacenter,
+            'rack': row.rack,
+            'os': row.os,
+            'arch': row.arch,
+            'team': row.team,
+            'service': row.service,
+            'service_version': row.service_version,
+            'service_environment': row.service_environment}
+        columns = {
+            'usage_user': row.usage_user,
+            'usage_system': row.usage_system,
+            'usage_idle': row.usage_idle,
+            'usage_nice': row.usage_nice,
+            'usage_iowait': row.usage_iowait,
+            'usage_irq': row.usage_irq,
+            'usage_softirq': row.usage_softirq,
+            'usage_steal': row.usage_steal,
+            'usage_guest': row.usage_guest,
+            'usage_guest_nice': row.usage_guest_nice}
+        obj.row(
+            'cpu',
+            symbols=symbols,
+            columns=columns,
+            at=qi.TimestampNanos(row.timestamp.value))
+
+
 def dataframe(obj, df):
     obj.dataframe(df, symbols=True, at='timestamp')
 
 
+_OP_MAP = {
+    'dataframe': dataframe,
+    'iterrows': send_py_row,
+    'itertuples': send_py_tuple}
+
+
 def serialize_one(args, df):
     buf = qi.Buffer()
-    op = send_py_row if args.py_row else dataframe
+    op = _OP_MAP[args.op]
     t0 = time.monotonic()
     op(buf, df)    
     t1 = time.monotonic()
@@ -287,7 +325,7 @@ def serialize_workers(args, df):
     # Warm up the thread pool.
     tpe.map(lambda e: None, [None] * args.workers)
 
-    op = send_py_row if args.py_row else dataframe
+    op = _OP_MAP[args.op]
 
     if args.debug:
         repld = [False]
@@ -340,7 +378,7 @@ def serialize_workers(args, df):
 
 
 def send_one(args, df, size):
-    op = send_py_row if args.py_row else dataframe
+    op = _OP_MAP[args.op]
     with qi.Sender(args.host, args.ilp_port) as sender:
         t0 = time.monotonic()
         op(sender, df)
@@ -383,7 +421,7 @@ def send_workers(args, df, size):
         finally:
             sender.close()
 
-    op = send_py_row if args.py_row else dataframe
+    op = _OP_MAP[args.op]
 
     t0 = time.monotonic()
     futures: list[Future] = [
