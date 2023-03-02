@@ -71,9 +71,9 @@ The numbers included below are from the following setup:
 * AMD 5950x
 * 64G ram DDR4-3600
 * 2TB Samsung 980 PRO
-* Linux (kernel version: 6.0.6)
+* Linux (kernel version: 5.19.0)
 * Python 3.10.8
-* QuestDB 6.6.1
+* QuestDB 7.0.1
 * 12 threads for QuestDB server.
 * 6 threads for the Python client in multi-threaded benchmarks.
 
@@ -89,7 +89,13 @@ host.
 # conf/server.conf
 shared.worker.count=6
 line.tcp.io.worker.count=6
+cairo.wal.enabled.default=true
 ```
+
+In addition, we've also enabled WAL tables as these give us better ingestion
+performance (specifically ~1.3x faster for single-threaded, and ~1.6x faster
+for multi-threaded gains in this specific benchmark suite and described
+hardware).
 
 If your benchmarking client and QuestDB server are on separate machines then you
 shouldn't need any config tweaks to get the best performance.
@@ -105,18 +111,19 @@ API and not looping through the dataframe row by row in Python.
 
 ## Results
 
-By implementing the Pandas ingestion layer in native code, we're now ~20x faster
-in single-threaded code and ~60x faster in multi-threaded code, including
+By implementing the Pandas ingestion layer in native code, we're now ~28x faster
+in single-threaded code and ~92x faster in multi-threaded code, including
 database insert operations.
 
 Our performance improvements for just serializing to an in-memory ILP buffer are
-even better: Single-threaded serialization performance is ~60x faster and ~290x
+even better: Single-threaded serialization performance is ~58x faster and ~284x
 faster when it's possible to serialize in parallel (when the Pandas column types
 hold data directly and not through Python objects).
 
 ### Notes
   * Numbers are taken from the runs shown later in this same page.
   * Timings *exclude* the time taken to generate the sample Pandas dataframe.
+  * NNx times faster calculated as FAST/SLOW using the MiB/s throughputs.
 
 ### Serialization to ILP in-memory buffer
 
@@ -127,10 +134,10 @@ https://quickchart.io/sandbox
 {
   type: 'bar',
   data: {
-    labels: ['df.iterrows() + sender.row()', 'sender.dataframe() - single thread', 'sender.dataframe() - 6 client threads'],
+    labels: ['df.iterrows() + sender.row()', 'sender.dataframe() - single thread', 'sender.dataframe() - 8 client threads'],
     datasets: [{
       label: 'Throughput MiB/s',
-      data: [8.96, 541.93, 2616.29],
+      data: [9.25, 543.04, 2635.69],
       borderColor: "#d14671",
       backgroundColor: "#d14671",
     }]
@@ -146,10 +153,10 @@ https://quickchart.io/sandbox
 {
   type: 'bar',
   data: {
-    labels: ['df.iterrows() + sender.row()', 'sender.dataframe() - single thread', 'sender.dataframe() - 6 client threads'],
+    labels: ['df.iterrows() + sender.row()', 'sender.dataframe() - single thread', 'sender.dataframe() - 8 client threads'],
     datasets: [{
       label: 'Throughput MiB/s',
-      data: [8.99, 196.34, 522.94],
+      data: [9.13, 261.04, 843.18],
       borderColor: "#b1b5d3",
       backgroundColor: "#b1b5d3",
     }]
@@ -197,7 +204,7 @@ with Sender('localhost', 9009) as sender:
 This was *very* slow.
 
 ```
-poetry run bench_pandas --op iterrows --send --row-count 1000000
+poetry run bench_pandas --py-row --send --row-count 1000000
 ```
 
 ```
@@ -206,10 +213,10 @@ Running with params:
      'host': 'localhost',
      'http_port': 9000,
      'ilp_port': 9009,
-     'op': 'iterrows',
+     'py_row': True,
      'row_count': 1000000,
      'scale': 4000,
-     'seed': 6568188686568556488,
+     'seed': 6484453060204943748,
      'send': True,
      'shell': False,
      'validation_query_timeout': 120.0,
@@ -219,11 +226,11 @@ Running with params:
 Dropped table cpu
 Created table cpu
 Serialized:
-  1000000 rows in 51.94s: 0.02 mil rows/sec.
-  ILP Buffer size: 465.19 MiB: 8.96 MiB/sec.
+  1000000 rows in 50.27s: 0.02 mil rows/sec.
+  ILP Buffer size: 465.27 MiB: 9.25 MiB/sec.
 Sent:
-  1000000 rows in 52.30s: 0.02 mil rows/sec.
-  ILP Buffer size: 465.19 MiB: 8.89 MiB/sec.
+  1000000 rows in 50.98s: 0.02 mil rows/sec.
+  ILP Buffer size: 465.27 MiB: 9.13 MiB/sec.
 ```
 
 During profiling, we found out that this was dominated (over 90% of the time) by
@@ -252,23 +259,24 @@ Running with params:
      'host': 'localhost',
      'http_port': 9000,
      'ilp_port': 9009,
+     'py_row': False,
      'row_count': 10000000,
      'scale': 4000,
-     'seed': 2895858008286271758,
+     'seed': 4803204514533752103,
      'send': True,
      'shell': False,
      'validation_query_timeout': 120.0,
      'worker_chunk_row_count': 10000,
      'workers': None,
      'write_ilp': None}
-Dropped table cpu
+Table cpu does not exist
 Created table cpu
 Serialized:
-  10000000 rows in 8.58s: 1.16 mil rows/sec.
-  ILP Buffer size: 4652.22 MiB: 541.93 MiB/sec.
+  10000000 rows in 8.57s: 1.17 mil rows/sec.
+  ILP Buffer size: 4652.50 MiB: 543.04 MiB/sec.
 Sent:
-  10000000 rows in 23.69s: 0.42 mil rows/sec.
-  ILP Buffer size: 4652.22 MiB: 196.34 MiB/sec.
+  10000000 rows in 17.82s: 0.56 mil rows/sec.
+  ILP Buffer size: 4652.50 MiB: 261.04 MiB/sec.
 ```
 
 ### Multi-threaded test (multithreaded use of `.dataframe()` API)
@@ -280,7 +288,7 @@ the data [out of order, but the database deals with it](https://questdb.io/docs/
 *Benchmarking code: `send_workers` in [`py_tsbs_benchmark/bench_pandas.py`](py_tsbs_benchmark/bench_pandas.py).*
 
 ```bash
-poetry run bench_pandas --send --workers 6
+poetry run bench_pandas --send --workers 8
 ```
 
 ```
@@ -289,23 +297,24 @@ Running with params:
      'host': 'localhost',
      'http_port': 9000,
      'ilp_port': 9009,
+     'py_row': False,
      'row_count': 10000000,
      'scale': 4000,
-     'seed': 2818475543994300661,
+     'seed': 1038685014730277296,
      'send': True,
      'shell': False,
      'validation_query_timeout': 120.0,
      'worker_chunk_row_count': 10000,
-     'workers': 6,
+     'workers': 8,
      'write_ilp': None}
 Dropped table cpu
 Created table cpu
 Serialized:
-  10000000 rows in 1.78s: 5.62 mil rows/sec.
-  ILP Buffer size: 4652.37 MiB: 2616.29 MiB/sec.
+  10000000 rows in 1.77s: 5.66 mil rows/sec.
+  ILP Buffer size: 4652.60 MiB: 2635.69 MiB/sec.
 Sent:
-  10000000 rows in 8.90s: 1.12 mil rows/sec.
-  ILP Buffer size: 4652.37 MiB: 522.94 MiB/sec.
+  10000000 rows in 5.52s: 1.81 mil rows/sec.
+  ILP Buffer size: 4652.60 MiB: 843.18 MiB/sec.
 ```
 
 ### Full options
