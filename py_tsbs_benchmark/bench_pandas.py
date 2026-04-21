@@ -6,14 +6,30 @@ import time
 import sys
 import pprint
 import textwrap
+import logging
 from concurrent.futures import ThreadPoolExecutor, Future
 from numba import vectorize, float64
 
 from .common import CpuTable
 
+# Set up logging
+logger = logging.getLogger(__name__)
+
 
 @vectorize([float64(float64, float64)])
 def _clip_add(x, y):
+    """Add two float64 values and clip the result to [0.0, 100.0] range.
+    
+    This is a vectorized function optimized with Numba for performance.
+    Used to generate realistic CPU usage data that stays within valid bounds.
+    
+    Args:
+        x (float64): First value to add
+        y (float64): Second value to add
+        
+    Returns:
+        float64: Sum of x and y, clipped to range [0.0, 100.0]
+    """
     z = x + y
     # Clip to the 0 and 100 boundaries
     if z < 0.0:
@@ -102,6 +118,26 @@ _MACHINE_SERVICE_ENVIRONMENT_CHOICES = [
 
 
 def gen_dataframe(seed, row_count, scale):
+    """Generate a synthetic TSBS-compatible CPU metrics DataFrame.
+    
+    Creates a pandas DataFrame with the same structure as the TSBS 'cpu'
+    dataset, containing 10 symbol columns (strings) and 10 numeric CPU usage
+    columns. The data simulates realistic server monitoring metrics across
+    multiple regions, datacenters, and hosts.
+    
+    Args:
+        seed (int): Random seed for reproducible data generation
+        row_count (int): Number of rows to generate
+        scale (int): Number of unique hostnames to cycle through
+        
+    Returns:
+        pd.DataFrame: DataFrame with TSBS cpu table schema containing:
+            - Symbol columns: hostname, region, datacenter, rack, os, arch,
+              team, service, service_version, service_environment
+            - Numeric columns: 10 CPU usage metrics (usage_user,
+              usage_system, etc.)
+            - timestamp: DateTime index with 10-second intervals
+    """
     rand, np_rand = random.Random(seed), np.random.default_rng(seed)
 
     def mk_symbols_series(strings):
@@ -151,7 +187,8 @@ def gen_dataframe(seed, row_count, scale):
         'usage_steal': mk_cpu_series(),
         'usage_guest': mk_cpu_series(),
         'usage_guest_nice': mk_cpu_series(),
-        'timestamp': pd.date_range('2016-01-01', periods=row_count, freq='10s'),
+        'timestamp': pd.date_range(
+            '2016-01-01', periods=row_count, freq='10s'),
     })
 
     df.index.name = 'cpu'
@@ -159,6 +196,11 @@ def gen_dataframe(seed, row_count, scale):
 
 
 def parse_args():
+    """Parse command line arguments for the benchmark script.
+    
+    Returns:
+        argparse.Namespace: Parsed command line arguments with defaults
+    """
     seed = random.randrange(sys.maxsize)
     import argparse
     parser = argparse.ArgumentParser()
@@ -171,16 +213,27 @@ def parse_args():
     parser.add_argument('--host', type=str, default='localhost')
     parser.add_argument('--ilp-port', type=int, default=9009)
     parser.add_argument('--http-port', type=int, default=9000)
-    parser.add_argument('--op', choices=['dataframe', 'iterrows', 'itertuples'],
-        default='dataframe')
+    parser.add_argument('--op',
+                        choices=['dataframe', 'iterrows', 'itertuples'],
+                        default='dataframe')
     parser.add_argument('--workers', type=int, default=None)
     parser.add_argument('--worker-chunk-row-count', type=int, default=10_000)
-    parser.add_argument('--validation-query-timeout', type=float, default=120.0)
+    parser.add_argument('--validation-query-timeout',
+                        type=float, default=120.0)
     parser.add_argument('--debug', action='store_true', default=False)
     return parser.parse_args()
 
 
 def chunk_up_dataframe(df, chunk_row_count):
+    """Split a DataFrame into smaller chunks for parallel processing.
+    
+    Args:
+        df (pd.DataFrame): DataFrame to split
+        chunk_row_count (int): Maximum number of rows per chunk
+        
+    Returns:
+        list[pd.DataFrame]: List of DataFrame chunks
+    """
     dfs = []
     for i in range(0, len(df), chunk_row_count):
         dfs.append(df.iloc[i:i + chunk_row_count])
@@ -188,6 +241,15 @@ def chunk_up_dataframe(df, chunk_row_count):
 
 
 def assign_dfs_to_workers(dfs, workers):
+    """Distribute DataFrame chunks evenly across workers using round-robin.
+    
+    Args:
+        dfs (list[pd.DataFrame]): List of DataFrame chunks
+        workers (int): Number of worker threads
+        
+    Returns:
+        list[list[pd.DataFrame]]: List of chunk lists, one per worker
+    """
     dfs_by_worker = [[] for _ in range(workers)]
     for i, df in enumerate(dfs):
         dfs_by_worker[i % workers].append(df)
@@ -195,22 +257,50 @@ def assign_dfs_to_workers(dfs, workers):
 
 
 def sanity_check_split(df, dfs):
+    """Verify that DataFrame chunks can be recombined to original DataFrame.
+    
+    Args:
+        df (pd.DataFrame): Original DataFrame
+        dfs (list[pd.DataFrame]): List of DataFrame chunks
+        
+    Raises:
+        AssertionError: If chunks don't match the original DataFrame
+    """
     df2 = pd.concat(dfs)
     assert len(df) == len(df2)
     assert df.equals(df2)
 
 
 def sanity_check_split2(df, dfs_by_worker):
+    """Verify that worker-assigned chunks can be recombined to original.
+    
+    Args:
+        df (pd.DataFrame): Original DataFrame
+        dfs_by_worker (list[list[pd.DataFrame]]): Chunks assigned to workers
+        
+    Raises:
+        AssertionError: If chunks don't match the original DataFrame
+    """
     df2 = pd.concat([
         df
         for dfs in dfs_by_worker
-            for df in dfs])
+        for df in dfs])
     df2.sort_values(by='timestamp', inplace=True)
     assert len(df) == len(df2)
     assert df.equals(df2)
 
 
 def chunk_up_by_worker(df, workers, chunk_row_count):
+    """Split DataFrame into chunks and assign them to workers.
+    
+    Args:
+        df (pd.DataFrame): DataFrame to split
+        workers (int): Number of worker threads
+        chunk_row_count (int): Maximum number of rows per chunk
+        
+    Returns:
+        list[list[pd.DataFrame]]: Chunks assigned to each worker
+    """
     dfs = chunk_up_dataframe(df, chunk_row_count)
     sanity_check_split(df, dfs)
     dfs_by_worker = assign_dfs_to_workers(dfs, workers)
@@ -294,7 +384,7 @@ def serialize_one(args, df):
     buf = qi.Buffer()
     op = _OP_MAP[args.op]
     t0 = time.monotonic()
-    op(buf, df)    
+    op(buf, df)
     t1 = time.monotonic()
     elapsed = t1 - t0
     if args.write_ilp:
@@ -445,36 +535,66 @@ def send_workers(args, df, size):
 
 
 def main():
+    """Main benchmark execution function."""
     args = parse_args()
+    
+    # Configure logging
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+        ]
+    )
+    
+    logger.info("Starting py-tsbs-benchmark")
     pretty_args = textwrap.indent(pprint.pformat(vars(args)), '    ')
     print(f'Running with params:\n{pretty_args}')
+    logger.debug(f"Configuration: {vars(args)}")
 
-    cpu_table = CpuTable(args.host, args.http_port)
+    try:
+        cpu_table = CpuTable(args.host, args.http_port)
+        logger.info(f"Connected to QuestDB at {args.host}:{args.http_port}")
 
-    if args.send:
-        cpu_table.drop()
-        cpu_table.create()
+        if args.send:
+            cpu_table.drop()
+            cpu_table.create()
 
-    df = gen_dataframe(args.seed, args.row_count, args.scale)
+        logger.info(f"Generating DataFrame with {args.row_count} rows")
+        df = gen_dataframe(args.seed, args.row_count, args.scale)
+        logger.info("DataFrame generation completed")
 
-    if not args.workers:
-        size = serialize_one(args, df)
-    else:
-        if args.workers < 1:
-            raise ValueError('workers must be >= 1')
-        size = serialize_workers(args, df)
-
-    if args.shell:
-        import code
-        code.interact(local=locals())
-
-    if args.send:
         if not args.workers:
-            send_one(args, df, size)
+            logger.info("Starting single-threaded serialization")
+            size = serialize_one(args, df)
         else:
-            send_workers(args, df, size)
+            if args.workers < 1:
+                raise ValueError('workers must be >= 1')
+            logger.info(f"Starting multi-threaded serialization with "
+                        f"{args.workers} workers")
+            size = serialize_workers(args, df)
 
-        cpu_table.block_until_rowcount(
-            args.row_count, timeout=args.validation_query_timeout)
-    else:
-        print('Not sending. Use --send to send to server.')
+        if args.shell:
+            import code
+            code.interact(local=locals())
+
+        if args.send:
+            if not args.workers:
+                logger.info("Starting single-threaded data transmission")
+                send_one(args, df, size)
+            else:
+                logger.info("Starting multi-threaded data transmission")
+                send_workers(args, df, size)
+
+            logger.info("Validating row count in database")
+            cpu_table.block_until_rowcount(
+                args.row_count, timeout=args.validation_query_timeout)
+            logger.info("Benchmark completed successfully")
+        else:
+            print('Not sending. Use --send to send to server.')
+            logger.info("Benchmark completed (serialization only)")
+            
+    except Exception as e:
+        logger.error(f"Benchmark failed: {e}", exc_info=True)
+        raise

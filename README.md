@@ -1,5 +1,25 @@
 # Benchmarking Ingestion of Pandas into QuestDB
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+## 🚀 Quick Start
+
+For the impatient, here's how to run a basic benchmark:
+
+```bash
+# Clone and setup
+git clone https://github.com/questdb/py-tsbs-benchmark.git
+cd py-tsbs-benchmark
+poetry install
+
+# Start QuestDB (in separate terminal)
+questdb start
+
+# Run benchmark with data ingestion
+poetry run bench_pandas --send --row-count 1000000
+```
+
 ## Background
 [QuestDB](https://questdb.io/) is our timeseries relational database with SQL
 query support. We support a dedicate protocol (called
@@ -34,34 +54,101 @@ The data consists of:
 * 1 TIMESTAMP column (unix epoch nanoseconds, UTC)
 
 To run these benchmarks, you will need:
-* Modern hardware with multiple cores and enough
-ram to hold a large Pandas dataset in memory.
-* Python 3.10 and [poetry](https://python-poetry.org/).
-* and a recent version of QuestDB.
+* Modern hardware with multiple cores and enough RAM to hold a large Pandas dataset in memory
+* **Python 3.10+** and [poetry](https://python-poetry.org/) for dependency management
+* A recent version of **QuestDB** (v7.0.1 or later recommended)
 
-You can follow through the setup and the run commands or just scroll down to see
-numbers from our benchmark runs.
+You can follow through the setup and run commands below, or skip to see 
+[benchmark results](#results) from our test runs.
+
+## 📦 Prerequisites
+
+### Python and Poetry
+
+1. **Python 3.10+**: Download from [python.org](https://www.python.org/downloads/)
+2. **Poetry**: Install using the official installer:
+   ```bash
+   # Linux/macOS/Windows (WSL)
+   curl -sSL https://install.python-poetry.org | python3 -
+   
+   # Windows (PowerShell)
+   (Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+   ```
+
+### QuestDB
+
+Download and install QuestDB:
+- **Docker**: `docker run -p 9000:9000 -p 9009:9009 questdb/questdb`
+- **Binary**: Download from [questdb.io/get-questdb](https://questdb.io/get-questdb/)
+- **Package managers**: `brew install questdb` (macOS) or see [installation guide](https://questdb.io/docs/get-started/docker/)
 
 ## Setup
 
-### Python Client
+### Python Environment and Dependencies
 
-After cloning this git repo:
+After cloning this repository:
 
 ```bash
-poetry env use 3.10
+# Clone the repository
+git clone https://github.com/questdb/py-tsbs-benchmark.git
+cd py-tsbs-benchmark
+
+# Set up Python environment and install dependencies
+poetry env use 3.10  # or python3.10 if poetry can't find it
 poetry install
+
+# Verify installation
+poetry run bench_pandas --help
 ```
 
-Note that each benchmark run will delete and re-create the `'cpu'` table.
+### Starting QuestDB
 
-### Preparing QuestDB
-
-Start a QuestDB instance.
+Start a QuestDB instance before running benchmarks:
 
 ```bash
+# Method 1: Using Docker (recommended for testing)
+docker run -p 9000:9000 -p 9009:9009 questdb/questdb
+
+# Method 2: Using local installation
 questdb start
+
+# Method 3: Using Docker Compose (see docker-compose.yml if available)
+docker-compose up questdb
 ```
+
+**Verify QuestDB is running**: Open [http://localhost:9000](http://localhost:9000) in your browser.
+
+## 🔧 Configuration
+
+### Basic Usage
+
+```bash
+# Run serialization-only benchmark (no database)
+poetry run bench_pandas --row-count 1000000
+
+# Run full benchmark with database ingestion
+poetry run bench_pandas --send --row-count 1000000
+
+# Multi-threaded benchmark
+poetry run bench_pandas --send --workers 4 --row-count 1000000
+
+# Custom QuestDB connection
+poetry run bench_pandas --send --host questdb.example.com --ilp-port 9009 --http-port 9000
+```
+
+### Command Line Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--row-count` | Number of rows to generate | 10,000,000 |
+| `--scale` | Number of unique hostnames | 4,000 |
+| `--workers` | Number of parallel threads | None (single-threaded) |
+| `--send` | Send data to QuestDB | False (serialize only) |
+| `--host` | QuestDB hostname | localhost |
+| `--ilp-port` | ILP port | 9009 |
+| `--http-port` | HTTP port | 9000 |
+| `--op` | Operation type | dataframe |
+| `--debug` | Enable debug logging | False |
 
 ## Running
 
@@ -377,3 +464,78 @@ cpu,hostname=host_7,region=ap-southeast-1,datacenter=ap-southeast-1a,rack=97,os=
 cpu,hostname=host_8,region=eu-central-1,datacenter=eu-central-1b,rack=43,os=Ubuntu16.04LTS,arch=x86,team=SF,service=18,service_version=0,service_environment=production usage_user=2.3683820719125404,usage_system=3.1496636608187587,usage_idle=1.0714252817838013,usage_nice=0.0,usage_iowait=3.658575628441112,usage_irq=0.0,usage_softirq=0.0,usage_steal=0.9944564076833474,usage_guest=3.606177791932647,usage_guest_nice=5.665699532249171 1451606480000000000
 cpu,hostname=host_9,region=sa-east-1,datacenter=sa-east-1b,rack=82,os=Ubuntu15.10,arch=x86,team=CHI,service=14,service_version=1,service_environment=staging usage_user=2.711560205310839,usage_system=2.92632821713108,usage_idle=1.6924636783124183,usage_nice=0.8654306023153091,usage_iowait=5.201435533195961,usage_irq=0.0,usage_softirq=1.7215318876485612,usage_steal=0.6839422702175311,usage_guest=3.1192465146389465,usage_guest_nice=5.414096713475799 1451606490000000000
 ```
+
+## 🧪 Testing
+
+Run the test suite to verify everything is working:
+
+```bash
+# Run all tests
+poetry run python -m pytest tests/ -v
+
+# Run tests with coverage
+poetry run python -m pytest tests/ --cov=py_tsbs_benchmark --cov-report=html
+
+# Run specific test modules
+poetry run python -m pytest tests/test_common.py -v
+poetry run python -m pytest tests/test_bench_pandas.py -v
+```
+
+## 🤝 Contributing
+
+We welcome contributions! This project is designed to be beginner-friendly for those 
+wanting to contribute to open-source Python projects.
+
+### Getting Started with Development
+
+1. **Fork and clone** the repository
+2. **Set up development environment**:
+   ```bash
+   poetry install --dev  # Install with development dependencies
+   poetry run pre-commit install  # Set up git hooks (if available)
+   ```
+3. **Run tests** to ensure everything works:
+   ```bash
+   poetry run python -m pytest tests/ -v
+   ```
+
+### Development Guidelines
+
+- **Code Style**: Follow PEP 8, use type hints where possible
+- **Documentation**: Add docstrings to all functions and classes
+- **Testing**: Write unit tests for new functionality
+- **Error Handling**: Use appropriate try-catch blocks and logging
+- **Commit Messages**: Use clear, descriptive commit messages in English
+
+### Suggested Areas for Contribution
+
+1. **Performance optimizations** in data generation or serialization
+2. **Additional benchmark metrics** (memory usage, latency percentiles)
+3. **Support for different data types** beyond the current TSBS schema
+4. **Improved error handling** and recovery mechanisms
+5. **Documentation improvements** and examples
+6. **CI/CD pipeline** setup and automation
+
+### Submitting Changes
+
+1. Create a feature branch: `git checkout -b feature/your-improvement`
+2. Make your changes with proper tests and documentation
+3. Run the test suite: `poetry run python -m pytest tests/ -v`
+4. Commit your changes: `git commit -m "feat: add your improvement"`
+5. Push and create a Pull Request with a clear description
+
+### Code of Conduct
+
+Please be respectful and constructive in all interactions. This project follows 
+the [Contributor Covenant](https://www.contributor-covenant.org/).
+
+## 📄 License
+
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## 🙋‍♀️ Support
+
+- **Documentation**: [QuestDB Documentation](https://questdb.io/docs/)
+- **Issues**: [GitHub Issues](https://github.com/questdb/py-tsbs-benchmark/issues)
+- **Community**: [QuestDB Slack](https://slack.questdb.io/)
+- **Python Client**: [py-questdb-client docs](https://py-questdb-client.readthedocs.io/)

@@ -15,6 +15,13 @@ pyarrow = "^10.0.1"
 numba = "^0.56.4"
 requests = "^2.28.1"
 
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.0.0"
+pytest-cov = "^4.0.0"
+black = "^23.0.0"
+flake8 = "^5.0.0"
+mypy = "^1.0.0"
+
 [tool.poetry.scripts]
 bench_pandas = "py_tsbs_benchmark.bench_pandas:main"
 bench_raw_ilp = "py_tsbs_benchmark.bench_raw_ilp:main"
@@ -22,3 +29,26 @@ bench_raw_ilp = "py_tsbs_benchmark.bench_raw_ilp:main"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--disable-warnings",
+    "-v"
+]
+
+[tool.coverage.run]
+source = ["py_tsbs_benchmark"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]
